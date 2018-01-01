@@ -1,0 +1,380 @@
+
+#Se importan todas las librerías necesarias para ejecutar las funciones.
+
+import sys
+import matplotlib.pyplot as plt
+from math import radians, cos, sin, asin, sqrt
+import numpy as np
+from matplotlib.animation import FuncAnimation
+import tkinter as tk
+from tkinter import filedialog
+
+#Mensaje inicial.
+
+print('Inserta el nombre del archivo. Recuerda escribir también su formato (.nme). El programa y el archivo de datos deben estar en un mismo directorio \n')
+archivo = input()
+while archivo[-4:] != '.nme':
+    print('No has insertado el archivo con el formato adecuado. Éste tiene que ser .nme')
+    archivo = input()
+
+#Función utilizada para calcular distancia a partir de coordenadas geográficas.
+#Utiliza una fórmula llamada "Algoritmo de Haversine.
+
+def haversine(lon1, lat1, lon2, lat2):
+    lon1, lat1, lon2, lat2 = map(radians, [lon1, lat1, lon2, lat2])
+    dlon = lon2 - lon1 
+    dlat = lat2 - lat1 
+    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+    c = 2 * asin(sqrt(a)) 
+    m = (6367 * c) * 1000
+    return m
+
+#Se crean listas para guardar datos de aceleración.
+#No se han utilizado para ningún cálculo.
+
+acc_n = list()
+acc_e = list()
+
+acc_nf = list()
+acc_ef = list()
+
+#Selecciona de las sentencias IMU los datos de aceleración y los guarda en las
+#listas anteriores.
+
+with open(archivo,"r") as file:
+    for i in file:
+        if "IMU" in i:
+            n1 = i[37+i[36:48].find(","):48]
+            n = n1[:n1.find(",")]
+            acc_n.append(n)
+
+            e1 = i[44+i[43:56].find(","):56]
+            e = e1[:e1.find(",")]
+            acc_e.append(e)
+
+for x in acc_n:
+    acc_nf.append(float(x))
+for x in acc_e:
+    acc_ef.append(float(x))
+
+#Selecciona los mensajes GGA y extrae los datos de coordenadas, siempre que el
+#aparato se encuentre en modo FIX, es decir, la posición 48 de la sentencia GGA
+#sea un '4'.
+
+#También selecciona de la sentencia RMC los datos de velocidad instantánea, y los
+#guarda en la lista correspondiente.    
+
+with open(archivo,"r") as file:
+    rec_dist = 0
+    fixed = True
+    hav = list()
+    v = list()
+    rmc_v = list()
+    for i in file:
+        if 'GGA' in i:
+            if i[48] == '4':
+                lon = -(int(i[34]) + float(i[35:45])/60)
+                hav.append(lon)
+                lat = int(i[17:19]) + (float(i[19:29]))/60
+                hav.append(lat)
+                fixed = True
+            else:
+                fixed = False
+        
+        if 'RMC' in i and fixed == True:
+            rmc_v.append(float(i[50:54])*1.852)
+
+#No se realizarán cálculos si ningún dato se ha obtenido en modo FIX.
+            
+if len(rmc_v) < 2:
+    print ('No se ha podido obtener datos en modo FIX, no se puede operar con precisión')
+    sys.exit(100)
+
+#Se obtienen los datos correspoendientes a las lecturas de una antena con respecto a la otra.
+#Se obtiene distancia entre antenas y ángulo de inclinación entre ellas.
+
+with open(archivo,"r") as file:
+    p_list = list()
+    dist_list_1 = list()
+    dist_list = list()
+    for i in file:
+        if 'BLS' in i and len(i) > 54:
+            pitch = i[-12:-6]
+            if ',' in pitch:
+                del_index = pitch.index(',') + 1
+                pitch = pitch[del_index:]
+                p_list.append(pitch)
+                
+            dist = i[-25:-17]
+
+            if dist.find(',') <= 3:
+                dist = dist[dist.find(',')+1:]
+                dist_list_1.append(dist)
+            for x in dist_list_1:
+                if x.find(',') > 4:
+                    x = x[:x.find(',')]
+                dist_list.append(x)
+
+#Algoritmo para calcular distancia recorrida y velocidad a partir de m.r.u.
+
+idx1 = 0
+idx2 = 1
+idx3 = 2
+idx4 = 3
+for x in range(len(hav)):
+    rec_dist += (haversine(hav[idx1],hav[idx2],hav[idx3],hav[idx4]))
+    inst_vel = ((haversine(hav[idx1],hav[idx2],hav[idx3],hav[idx4]))/0.2)*3.6
+    v.append(inst_vel)
+    idx1 = idx1 + 2
+    idx2 = idx2 + 2
+    idx3 = idx3 + 2
+    idx4 = idx4 + 2
+    if idx1 >= len(hav) or idx2 >= len(hav) or idx3 >= len(hav) or idx4 >= len(hav):
+        break
+
+#Función que dibuja el gráfico de velocidad.
+        
+def vel_graf():
+    time_array = list()
+    time = 0
+    for i in range(len(rmc_v)):
+        time_array.append(time)
+        time += 0.2
+    plt.plot(time_array, rmc_v, 'b-')
+    plt.ylabel('Velocidad instantánea en km/h')
+    plt.xlabel('tiempo (s)')
+    plt.show()
+
+
+#Función que dibuja el gráfico de aceleración de cero a 30 km/h
+
+def cero_a_30():
+    time_array = list()
+    time = 0
+    for i in range(len(rmc_v)):
+        time_array.append(time)
+        time += 0.2
+    c = 0
+    for x in rmc_v:
+        c += 1
+        if x > 30:
+            t = c * 0.2
+            plt.plot(time_array, rmc_v,'b-')
+            plt.axvline(x = t)
+            plt.ylabel('Velocidad instantánea en km/h')
+            plt.xlabel('De cero a 30 km/h en %.2f segundos' %(t))
+            plt.show()
+            break
+    else:
+        plt.plot(time_array, rmc_v,'b-')
+        plt.ylabel('Velocidad instantánea en km/h')
+        plt.xlabel("No se ha llegado a la velocidad requerida")
+        plt.show()
+
+#Función que dibuja la comparación entre velocidad tomada de satélite y velocidad con m.r.u.
+        
+def comp_vel():
+    time_array = list()
+    time = 0
+    for i in range(len(v)):
+        time_array.append(time)
+        time += 0.2
+
+    if len(v) > len(rmc_v):
+        idx = len(rmc_v)
+    elif len(v) == len(rmc_v):
+        idx = len(v)
+    else:
+        idx = len(v)
+    
+    plt.plot(time_array[:idx], v[:idx], 'b-',time_array[:idx], rmc_v[:idx], 'r:')
+    plt.ylabel('Velocidad instantánea en km/h')
+    plt.xlabel('tiempo (s)')
+    plt.show()
+
+avg_vel_gga = float(sum(v)) / max(len(v), 1)
+avg_vel_rmc = float(sum(rmc_v)) / max(len(rmc_v), 1)
+max_gga_vel = max(v)
+max_vel_rmc = max(rmc_v)
+
+#Función que dibuja la animación de la inclinación del vehículo/móvil a la vez que la trayectoria.
+
+def pitch():
+
+    from pyproj import Proj
+    myProj = Proj("+proj=utm +zone=30 +north +ellps=WGS84 +datum=WGS84 +units=m +no_defs") 
+
+    utm = list()
+    utm_x = list()
+    utm_y = list()
+
+    lat = 0
+    lon = 1
+    for x in range(len(hav)):
+        utm.append(myProj(hav[lat],hav[lon]))
+        lat += 2
+        lon += 2
+        if lon >=len(hav):
+            break
+
+    for i in utm:
+        utm_x.append(i[0])
+        utm_y.append(i[1])
+    
+    p1 = list()
+    p2 = list()
+
+    for i in p_list:
+        p1.append(float(i)/2)
+
+    for i in p_list:
+        p2.append(float(i)/-2)
+
+
+    fig = plt.figure()
+
+    ax1 = fig.add_subplot(211)
+    ax2 = fig.add_subplot(212)
+
+    line1, = ax1.plot([],[], 'b-')
+
+
+    ax1.set_xlim(min(utm_x)-5,max(utm_x)+5)
+    ax1.set_ylim(min(utm_y)-5,max(utm_y)+5)
+    ax1.grid()
+
+    ax2.set_xlim(-0.5,2)
+    ax2.set_ylim(-10,10)
+    ax2.grid()
+    
+    #fig, ax = plt.subplots()
+    x2data, y2data = dist_list[0], None
+    x1data, y1data = 0, None
+    line2, = ax2.plot([], [], 'ro-', animated=True)
+    plt.ylabel('Inclinación en grados')
+    plt.xlabel('Distancia entre antenas (m)')
+
+    def update(frame):
+        x0 = utm_x[:frame]
+        y0 = utm_y[:frame]
+        line1.set_data(x0,y0)
+        x2data = dist_list[frame]
+        y2data = p2[frame]
+        y1data = p1[frame]
+        line2.set_data([x1data, x2data],[y1data,y2data])
+        return line1, line2
+
+    ani = FuncAnimation(fig, update, frames=range(len(p_list)), blit=True, interval = 50)
+    plt.show()
+
+#Función que dibuja la animación del movimiento del vehículo en planta con el gráfico de velocidad.
+
+def traj():
+
+    time_array = list()
+    time = 0
+    for i in range(len(rmc_v)):
+        time_array.append(time)
+        time += 0.2
+    
+    from pyproj import Proj
+    myProj = Proj("+proj=utm +zone=30 +north +ellps=WGS84 +datum=WGS84 +units=m +no_defs") 
+
+    utm = list()
+    utm_x = list()
+    utm_y = list()
+
+    lat = 0
+    lon = 1
+    for x in range(len(hav)):
+        utm.append(myProj(hav[lat],hav[lon]))
+        lat += 2
+        lon += 2
+        if lon >=len(hav):
+            break
+
+    for i in utm:
+        utm_x.append(i[0])
+        utm_y.append(i[1])
+
+    fig = plt.figure()
+
+    ax1 = fig.add_subplot(211)
+    ax2 = fig.add_subplot(212)
+
+    line1, = ax1.plot([],[], 'b-')
+    line2, = ax2.plot([],[], '-')
+    line = [line1,line2]
+
+    ax1.set_xlim(min(utm_x)-5,max(utm_x)+5)
+    ax1.set_ylim(min(utm_y)-5,max(utm_y)+5)
+    ax1.grid()
+    ax2.set_xlim(0,max(time_array)+5)
+    ax2.set_ylim(-0.2,max(rmc_v)+5)
+    ax2.grid()
+
+    plt.ylabel('Velocidad instantánea en km/h')
+    plt.xlabel('tiempo (s)')
+    
+
+    def update(frame):
+
+        x0 = utm_x[:frame]
+        y0 = utm_y[:frame]
+        x1 = time_array[:frame]
+        y1 = rmc_v[:frame]
+        line[0].set_data(x0,y0)
+        line[1].set_data(x1,y1)
+        return line[0],line[1]
+
+    ani = FuncAnimation(fig, update, frames=range(len(utm_x)), interval=50,blit = True)
+    plt.show()
+
+#Código necesario para inicializar la GUI.
+
+from tkinter import *
+root = Tk()
+
+var2 = StringVar()
+var2.set("Velocidad media: %.2f km/h" % (avg_vel_rmc))
+l1 = Label(root, textvariable = var2)
+l1.grid()
+
+var4 = StringVar()
+var4.set("Velocidad máxima: %.2f km/h" %(max_vel_rmc))
+l3 = Label(root, textvariable = var4)
+l3.grid()
+
+var5 = StringVar()
+var5.set("Distancia recorrida: %.2f metros" % (rec_dist))
+l4 = Label(root, textvariable = var5)
+l4.grid()
+
+graf_button = Button(root)
+graf_button["text"] = "Obtener gráfica de velocidades"
+graf_button["command"] = vel_graf
+graf_button.grid()
+
+acc_button = Button(root)
+acc_button["text"] = "Tiempo de cero a 30 km/h"
+acc_button["command"] = cero_a_30
+acc_button.grid()
+
+comp_button = Button(root)
+comp_button["text"] = "Comparación de velocidades obtenidas"
+comp_button["command"] = comp_vel
+comp_button.grid()
+
+pitch_button = Button(root)
+pitch_button["text"] = "Inclinación instantánea del vehículo"
+pitch_button["command"] = pitch
+pitch_button.grid()
+
+traj_button = Button(root)
+traj_button["text"] = "Ver trayectoria en planta"
+traj_button["command"] = traj
+traj_button.grid()
+
+root.title("Datos")
+root.geometry("300x300")
+root.mainloop()
