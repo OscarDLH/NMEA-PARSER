@@ -1,0 +1,70 @@
+function roll(num)
+close all;
+clc;
+
+%Apertura del puerto
+
+delete(instrfind({'Port'},{'COM4'}));
+puerto = serial('COM4');
+puerto.BaudRate = 230400;
+warning('off','MATLAB:serial:fscanf:unsuccesfulRead');
+
+fopen(puerto);
+puerto.Parity = 'none';
+
+%Inicia el contador 
+
+c = 0;
+figure('Name','Inclinación instantánea del vehículo')
+title('Gráfico de movimiento del receptor')
+xlabel('x')
+ylabel('y')
+
+grid on
+hold on
+
+%Inicializa el gráfico dinámico en función del número de sentencias que se
+%requieran. 1 min -> 3500 sentencias (aprox)
+
+while c <= num
+    nmea = fscanf(puerto);
+    if strfind(nmea,'BLS') == 6
+        disp(nmea)
+        roll = nmea(length(nmea)-12:length(nmea)-7);
+        if roll(1) == ','
+            roll = roll(2:length(roll));
+        elseif roll(2) == ','
+            roll = roll(3:length(roll));
+        end
+        roll = str2double(roll);
+        
+        d = nmea(length(nmea)-25:length(nmea)-15);
+        
+        idx = strfind(d,',');
+        if numel(idx) == 1
+            d = str2double(d(1:idx-1));
+        elseif numel(idx) > 1
+            d = str2double(d(idx(1)+1:idx(2)-1));
+        end
+        xlim([-1 5]);
+        ylim([-50 50]);
+        plot(1,0,'ro')
+        plot(2.5,roll,'bo')
+        plot([0,d],[0,roll],'r')
+        axis([-1 d+1 -50 50])
+        %legend(num2str(roll),num2str(d),'Location','northwest')
+        hold off
+        drawnow
+        clear roll
+        clear d
+        
+    end
+    c =  c + 1;
+end
+
+% Cierra el puerto
+
+fclose(puerto);
+delete(puerto);
+clear all;
+end
